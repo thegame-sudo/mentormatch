@@ -1,0 +1,48 @@
+# =============================================================================
+# MENTORMATCH — Docker Compose
+# =============================================================================
+# Lance l'application avec une seule commande : docker compose up
+#
+# Services inclus :
+#   - mentormatch : l'application Flask
+#   - ollama      : LLM local (optionnel, pour le mode Local)
+# =============================================================================
+
+version: '3.8'
+
+services:
+
+  # ── Application principale MentorMatch ──
+  mentormatch:
+    build: .                          # construit l'image depuis le Dockerfile local
+    container_name: mentormatch
+    ports:
+      - "5001:5001"                   # accès via http://localhost:5001
+    environment:
+      - PORT=5001
+      # Pour le mode Ollama, l'URL pointe vers le service ollama dans le même réseau Docker
+      - OLLAMA_URL=http://ollama:11434
+    volumes:
+      # Monte les fichiers CSV pour pouvoir les modifier sans reconstruire l'image
+      - ./mentors.csv:/app/mentors.csv
+      - ./mentores.csv:/app/mentores.csv
+    depends_on:
+      - ollama
+    restart: unless-stopped           # redémarre automatiquement si le conteneur plante
+
+  # ── Ollama — LLM local (optionnel) ──
+  # Nécessaire uniquement si tu utilises le mode "Local (Ollama)"
+  # Si tu n'utilises que CamemBERT ou Mistral API, tu peux commenter ce bloc.
+  ollama:
+    image: ollama/ollama:latest       # image officielle Ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"                 # port standard d'Ollama
+    volumes:
+      # Persistance des modèles Ollama (évite de les re-télécharger à chaque restart)
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+# ── Volumes persistants ──
+volumes:
+  ollama_data:    # stocke les modèles Ollama téléchargés (Mistral 7B, etc.)

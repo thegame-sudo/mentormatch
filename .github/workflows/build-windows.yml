@@ -1,0 +1,66 @@
+name: Build Windows .exe
+
+# Déclenche le build manuellement depuis GitHub (bouton "Run workflow")
+# ou automatiquement à chaque push sur la branche main
+on:
+  workflow_dispatch:   # déclenchement manuel
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest   # machine virtuelle Windows fournie par GitHub
+
+    steps:
+
+      # ── Étape 1 : Récupère le code source ──────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Étape 2 : Installe Python 3.11 ─────────────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── Étape 3 : Installe toutes les dépendances Python ───────────────────
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install flask==3.0.0 pandas==2.1.4 openpyxl==3.1.0 requests==2.31.0
+          pip install "numpy>=1.26,<2" scikit-learn==1.3.2
+          pip install sentence-transformers==3.0.0
+          pip install Pillow pyinstaller
+
+      # ── Étape 4 : Télécharge le modèle CamemBERT dans ./models/ ────────────
+      # Le modèle sera inclus dans le .exe (pas besoin d'internet au runtime)
+      - name: Download CamemBERT model
+        run: |
+          python -c "
+          import os
+          os.makedirs('models', exist_ok=True)
+          os.environ['SENTENCE_TRANSFORMERS_HOME'] = './models'
+          from sentence_transformers import SentenceTransformer
+          SentenceTransformer('distiluse-base-multilingual-cased-v2', cache_folder='./models')
+          print('Modele telecharge !')
+          "
+
+      # ── Étape 5 : Build avec PyInstaller (spec Windows) ────────────────────
+      - name: Build with PyInstaller
+        run: pyinstaller MentorMatch-windows.spec --clean --noconfirm
+
+      # ── Étape 6 : Zippe le résultat ─────────────────────────────────────────
+      - name: Zip the output
+        run: |
+          cd dist
+          Compress-Archive -Path MentorMatch -DestinationPath MentorMatch-Windows.zip
+        shell: powershell
+
+      # ── Étape 7 : Upload l'artifact téléchargeable depuis GitHub ───────────
+      # Disponible dans l'onglet Actions → ton workflow → Artifacts
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MentorMatch-Windows
+          path: dist/MentorMatch-Windows.zip
+          retention-days: 30   # disponible 30 jours

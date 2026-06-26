@@ -1,0 +1,26 @@
+# Dossiers générés par PyInstaller (trop gros pour GitHub)
+dist/
+build/
+
+# Modèle CamemBERT (téléchargé automatiquement par le workflow GitHub Actions)
+models/
+
+# Environnement virtuel Python
+venv/
+env/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Fichiers système macOS
+.DS_Store
+
+# Fichiers de configuration locale Claude Code
+.claude/
+
+# Logs
+*.log
+*.tmp
+*.bak

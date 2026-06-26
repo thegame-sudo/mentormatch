@@ -1,0 +1,24 @@
+# Fichiers à exclure de l'image Docker pour la garder légère et sécurisée
+
+# Environnement virtuel Python local (inutile dans Docker)
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Fichiers système macOS
+.DS_Store
+
+# Fichiers de configuration locale Claude Code
+.claude/
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+
+# Fichiers temporaires
+*.tmp
+*.bak
