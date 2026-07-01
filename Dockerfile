@@ -1,57 +1,47 @@
 # =============================================================================
-# MENTORMATCH — Dockerfile
+# AlterEgale Match — Dockerfile (compatible Hugging Face Spaces)
 # =============================================================================
-# Image de base : Python 3.11 slim (légère, sans outils inutiles)
 FROM python:3.11-slim
 
-# Métadonnées
-LABEL maintainer="MentorMatch" description="Application de matching mentor/mentoré"
+LABEL maintainer="AlterEgale Match" description="Application de matching mentor/mentoré Fides 10"
 
-# Variables d'environnement
+# Port 7860 obligatoire pour Hugging Face Spaces
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=5001 \
-    # Dossier de cache pour le modèle CamemBERT (à l'intérieur du conteneur)
+    PORT=7860 \
     TRANSFORMERS_CACHE=/app/models \
-    HF_HOME=/app/models
+    HF_HOME=/app/models \
+    SENTENCE_TRANSFORMERS_HOME=/app/models
 
-# Répertoire de travail dans le conteneur
 WORKDIR /app
 
-# ── Étape 1 : Installation des dépendances système ──
-# build-essential est nécessaire pour compiler certains packages Python (scipy, etc.)
+# ── Dépendances système ──
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
+    build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Étape 2 : Installation des dépendances Python ──
-# On copie d'abord uniquement requirements.txt pour profiter du cache Docker :
-# si les dépendances ne changent pas, Docker ne réinstalle pas tout à chaque build.
+# ── Dépendances Python ──
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# ── Étape 3 : Pré-téléchargement du modèle CamemBERT ──
-# On télécharge le modèle pendant le build pour qu'il soit inclus dans l'image.
-# Ainsi, l'app démarre immédiatement sans accès internet au runtime.
-# Note : cela alourdit l'image d'environ 500 Mo.
+# ── Pré-téléchargement du modèle CamemBERT ──
 RUN python -c "\
 from sentence_transformers import SentenceTransformer; \
-print('Téléchargement du modèle CamemBERT...'); \
+print('Téléchargement du modèle...'); \
 SentenceTransformer('distiluse-base-multilingual-cased-v2'); \
-print('Modèle téléchargé et mis en cache.')"
+print('Modèle prêt.')"
 
-# ── Étape 4 : Copie du code de l'application ──
-# On copie après l'installation des dépendances pour optimiser le cache Docker
+# ── Copie du code ──
 COPY app.py .
 COPY templates/ templates/
 COPY static/ static/
 
-# ── Étape 5 : Exposition du port ──
-EXPOSE 5001
+# ── Utilisateur non-root (requis par Hugging Face Spaces) ──
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser
 
-# ── Étape 6 : Commande de démarrage ──
-# On utilise gunicorn en production (plus stable que le serveur de développement Flask)
-# Fallback sur python app.py si gunicorn n'est pas disponible
+# ── Port Hugging Face Spaces ──
+EXPOSE 7860
+
 CMD ["python", "app.py"]

@@ -185,6 +185,124 @@ def map_and_normalize(df):
 
 
 # =============================================================================
+# ENSEMBLE TEXT MINING — CamemBERT + TF-IDF + BM25
+# =============================================================================
+# On combine trois modèles complémentaires pour scorer la similarité
+# entre les textes libres du mentor (motivation) et du mentoré (attentes_texte).
+#
+# Pourquoi trois modèles ?
+#   - CamemBERT : comprend le SENS des phrases (sémantique profonde)
+#     Ex: "développer ma confiance" ≈ "gagner en assurance" → score élevé
+#   - TF-IDF    : mesure l'OVERLAP de mots-clés (similarité lexicale)
+#     Ex: deux textes avec "leadership" et "équipe" → score élevé
+#   - BM25      : algorithme de recherche (Google-style), pondère les mots rares
+#     Ex: un mot rare commun aux deux textes → score très élevé
+#
+# Ensemble = moyenne pondérée des trois → plus robuste qu'un seul modèle
+
+def tfidf_score(text1, text2):
+    """
+    Calcule la similarité cosinus TF-IDF entre deux textes.
+    TF-IDF transforme chaque texte en vecteur de mots pondérés par leur fréquence.
+    Retourne un score entre 0 et 100.
+    Avantage : rapide, sensible aux mots-clés communs.
+    """
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+        if not text1.strip() or not text2.strip():
+            return 50
+        # On vectorise les deux textes ensemble pour avoir un espace commun
+        vec = TfidfVectorizer(min_df=1, analyzer='word', ngram_range=(1, 2))
+        mat = vec.fit_transform([text1, text2])
+        score = cosine_similarity(mat[0], mat[1])[0][0] * 100
+        return int(score)
+    except:
+        return 50
+
+def bm25_score(text1, text2):
+    """
+    Calcule un score BM25 bidirectionnel entre deux textes.
+    BM25 (Best Match 25) est l'algorithme de ranking utilisé par les moteurs
+    de recherche — il pondère les mots rares plus fortement que les mots communs.
+
+    On le calcule dans les deux sens (text1 → text2 ET text2 → text1) puis
+    on fait la moyenne pour obtenir un score symétrique.
+    Retourne un score entre 0 et 100.
+    """
+    try:
+        from rank_bm25 import BM25Okapi
+        import re
+
+        def tokenize(t):
+            # Tokenisation simple : minuscules, on garde les mots de 2+ caractères
+            return [w for w in re.findall(r'\b\w{2,}\b', t.lower()) if w]
+
+        t1, t2 = tokenize(text1), tokenize(text2)
+        if not t1 or not t2:
+            return 50
+
+        # Sens 1 : text1 comme corpus, text2 comme requête
+        bm1 = BM25Okapi([t1])
+        s1  = bm1.get_scores(t2)[0]
+
+        # Sens 2 : text2 comme corpus, text1 comme requête
+        bm2 = BM25Okapi([t2])
+        s2  = bm2.get_scores(t1)[0]
+
+        # Moyenne des deux directions → score symétrique
+        raw = (s1 + s2) / 2
+
+        # Normalisation : BM25 produit des scores typiquement entre 0 et 10
+        # pour des textes courts. On scale vers [0, 100] avec une sigmoïde douce.
+        import math
+        normalized = 100 / (1 + math.exp(-(raw - 2) * 0.8))
+        return int(min(100, max(0, normalized)))
+    except:
+        return 50
+
+def ensemble_text_score(text_mentor, text_mentore):
+    """
+    Score d'ensemble combinant CamemBERT + TF-IDF + BM25.
+    Chaque modèle apporte une perspective différente :
+        - CamemBERT (50%) : sens sémantique profond
+        - BM25       (30%) : pertinence des mots-clés rares
+        - TF-IDF     (20%) : overlap lexical général
+
+    Retourne un score entre 0 et 100.
+    """
+    t1 = str(text_mentor).strip()
+    t2 = str(text_mentore).strip()
+
+    # Si l'un des textes est vide, score neutre
+    if not t1 or not t2:
+        return 50
+
+    # ── CamemBERT : similarité sémantique ──────────────────────────────────
+    try:
+        from sklearn.metrics.pairwise import cosine_similarity
+        model = get_st_model()
+        e1 = model.encode(t1)
+        e2 = model.encode(t2)
+        camembert = int(cosine_similarity([e1], [e2])[0][0] * 100)
+    except:
+        camembert = 50
+
+    # ── TF-IDF : overlap de mots-clés ──────────────────────────────────────
+    tfidf = tfidf_score(t1, t2)
+
+    # ── BM25 : pertinence des termes rares ─────────────────────────────────
+    bm25 = bm25_score(t1, t2)
+
+    # ── Moyenne pondérée ───────────────────────────────────────────────────
+    # CamemBERT a le plus de poids car il comprend le sens, pas seulement les mots
+    score = int(camembert * 0.50 + bm25 * 0.30 + tfidf * 0.20)
+
+    print(f"[Ensemble] CamemBERT={camembert} TF-IDF={tfidf} BM25={bm25} → {score}")
+    return score
+
+
+# =============================================================================
 # MODÈLE CAMEMBERT — chargement unique en mémoire
 # =============================================================================
 # Le modèle sentence_transformers est lourd (plusieurs centaines de Mo).
@@ -245,24 +363,16 @@ def score_camembert(mentor, mentore, weights):
     else:
         coverage_score  = 50  # pas de catégorie déclarée : score neutre
 
-    # 1b. Similarité CamemBERT sur les textes libres (motivation mentor vs attentes texte)
-    #     On compare le texte de motivation du mentor avec les attentes libres du mentoré.
-    try:
-        from sklearn.metrics.pairwise import cosine_similarity
-        model = get_st_model()
-        t_mentor  = str(mentor.get('motivation', mentor.get('attentes_supportees', '')))
-        t_mentore = str(mentore.get('attentes_texte', mentore.get('attentes_categories', '')))
-        if t_mentor.strip() and t_mentore.strip():
-            e1 = model.encode(t_mentor)
-            e2 = model.encode(t_mentore)
-            semantic_score = int(cosine_similarity([e1], [e2])[0][0] * 100)
-        else:
-            semantic_score = 50
-    except:
-        semantic_score = 50
+    # 1b. Score ensemble sur les textes libres (motivation mentor vs attentes_texte mentoré)
+    #     On utilise CamemBERT + TF-IDF + BM25 en parallèle pour un score plus robuste.
+    #     CamemBERT comprend le sens, TF-IDF et BM25 mesurent l'overlap de mots-clés.
+    t_mentor  = str(mentor.get('motivation', mentor.get('attentes_supportees', '')))
+    t_mentore = str(mentore.get('attentes_texte', mentore.get('attentes_categories', '')))
+    semantic_score = ensemble_text_score(t_mentor, t_mentore)
 
-    # Score d'attentes final = moyenne des deux sous-scores
-    attentes_score = int((coverage_score + semantic_score) / 2)
+    # Score d'attentes final = moyenne pondérée couverture catégorielle + ensemble texte
+    # La couverture catégorielle est très fiable (données structurées) → poids plus élevé
+    attentes_score = int(coverage_score * 0.55 + semantic_score * 0.45)
 
     # ── Critère 2 : Mixité H/F ────────────────────────────────────────────────
     # La mixité est recommandée dans le programme alter égales.
@@ -965,4 +1075,4 @@ if __name__ == "__main__":
     # Le port peut être configuré via la variable d'environnement PORT
     # utile pour le déploiement en production (ex: Heroku, Railway, etc.)
     port = int(os.environ.get("PORT", 5001))
-    app.run(debug=True, port=port)
+    app.run(debug=False, host="0.0.0.0", port=port)
